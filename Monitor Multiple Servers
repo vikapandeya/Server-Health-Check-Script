@@ -1,0 +1,92 @@
+#!/bin/bash
+# =============================================================
+# Multi-Server Health Check & HTML Dashboard By Vikash Pandey
+# =============================================================
+
+# CONFIGURATION
+SERVERS=("user1@192.168.1.101" "user2@192.168.1.102")  # List of servers with SSH access
+SERVICES=("nginx" "apache2" "mysql")                  # Services to monitor
+CPU_THRESHOLD=80
+MEM_THRESHOLD=80
+DISK_THRESHOLD=80
+EMAIL="admin@example.com"                              # Email to send HTML report
+OUTPUT="/var/www/html/server_health_report.html"       # HTML dashboard location
+
+# HTML Header
+echo "<html><head><title>Server Health Dashboard</title><style>
+body {font-family: monospace; background:#111; color:#eee; padding:20px;}
+h2 {color:#0f0;}
+.warning {color:#f00; font-weight:bold;}
+table {width:100%; border-collapse: collapse;}
+th, td {border:1px solid #555; padding:5px; text-align:left;}
+th {background:#333;}
+td {background:#222;}
+</style></head><body>" > $OUTPUT
+echo "<h1>Server Health Dashboard - $(date)</h1>" >> $OUTPUT
+
+# Loop through each server
+for SERVER in "${SERVERS[@]}"; do
+    echo "<hr><h2>Server: $SERVER</h2>" >> $OUTPUT
+
+    # Run remote commands via SSH
+    ssh -o BatchMode=yes -o ConnectTimeout=5 $SERVER bash <<'ENDSSH' >> $OUTPUT
+echo "<h3>Uptime</h3>"
+echo "<pre>$(uptime)</pre>"
+
+echo "<h3>CPU Load</h3>"
+CPU_LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | cut -d. -f1)
+if [ "$CPU_LOAD" -ge 80 ]; then
+    echo "<p class='warning'>CPU Load: $CPU_LOAD (High)</p>"
+else
+    echo "<p>CPU Load: $CPU_LOAD</p>"
+fi
+
+echo "<h3>Memory Usage</h3>"
+MEM_USED=$(free | awk '/Mem:/ {printf("%.0f"), $3/$2 * 100}')
+if [ "$MEM_USED" -ge 80 ]; then
+    echo "<p class='warning'>Memory Usage: $MEM_USED% (High)</p>"
+else
+    echo "<p>Memory Usage: $MEM_USED%</p>"
+fi
+free -h | awk '{print "<pre>"$0"</pre>"}'
+
+echo "<h3>Disk Usage</h3>"
+df -h | awk -v th=80 '$5+0 >= th {print "<p class=\"warning\">"$0"</p>"} $5+0 < th {print "<pre>"$0"</pre>"}'
+
+echo "<h3>Swap Usage</h3>"
+swapon --show | awk '{print "<pre>"$0"</pre>"}'
+
+echo "<h3>Top 5 CPU Processes</h3>"
+ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n6 | awk '{print "<pre>"$0"</pre>"}'
+
+echo "<h3>Top 5 Memory Processes</h3>"
+ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n6 | awk '{print "<pre>"$0"</pre>"}'
+
+echo "<h3>Service Status</h3>"
+for service in nginx apache2 mysql; do
+    if systemctl is-active --quiet $service; then
+        echo "<p>$service is running</p>"
+    else
+        echo "<p class='warning'>$service is NOT running!</p>"
+    fi
+done
+
+echo "<h3>Network Connections</h3>"
+ss -tuln | awk '{print "<pre>"$0"</pre>"}'
+
+echo "<h3>Recent Failed SSH Logins</h3>"
+grep "Failed password" /var/log/auth.log | tail -n 5 | awk '{print "<pre>"$0"</pre>"}'
+
+ENDSSH
+
+done
+
+# HTML Footer
+echo "</body></html>" >> $OUTPUT
+
+# Optional: Email dashboard
+if [ -f "$OUTPUT" ]; then
+    mail -a "Content-type: text/html;" -s "Server Health Dashboard" $EMAIL < $OUTPUT
+fi
+
+echo "Server health dashboard generated at $OUTPUT"
