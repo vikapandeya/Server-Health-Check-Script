@@ -1,0 +1,84 @@
+#!/bin/bash
+# ==========================================================
+# Server Health Check Script By Vikash Pandey
+# ==========================================================
+
+# CONFIGURATION
+EMAIL="admin@example.com"      # Email to send alerts
+CPU_THRESHOLD=80               # CPU load percentage threshold
+MEM_THRESHOLD=80               # Memory usage percentage threshold
+DISK_THRESHOLD=80              # Disk usage percentage threshold
+SERVICES=("nginx" "apache2" "mysql") # Services to monitor
+
+# LOG FILE
+LOG_FILE="/var/log/server_health_check.log"
+echo "Health Check Report - $(date)" > $LOG_FILE
+
+# 1. Uptime
+echo -e "\n=== Server Uptime ===" | tee -a $LOG_FILE
+uptime | tee -a $LOG_FILE
+
+# 2. CPU Load
+CPU_LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | cut -d. -f1)
+echo -e "\n=== CPU Load ===" | tee -a $LOG_FILE
+echo "Current CPU Load: $CPU_LOAD" | tee -a $LOG_FILE
+if [ "$CPU_LOAD" -ge "$CPU_THRESHOLD" ]; then
+    echo "WARNING: CPU load exceeds threshold ($CPU_THRESHOLD%)" | tee -a $LOG_FILE
+fi
+
+# 3. Memory Usage
+echo -e "\n=== Memory Usage ===" | tee -a $LOG_FILE
+MEM_USED=$(free | awk '/Mem:/ {printf("%.0f"), $3/$2 * 100}')
+free -h | tee -a $LOG_FILE
+if [ "$MEM_USED" -ge "$MEM_THRESHOLD" ]; then
+    echo "WARNING: Memory usage exceeds threshold ($MEM_THRESHOLD%)" | tee -a $LOG_FILE
+fi
+
+# 4. Swap Usage
+echo -e "\n=== Swap Usage ===" | tee -a $LOG_FILE
+swapon --show | tee -a $LOG_FILE
+
+# 5. Disk Usage
+echo -e "\n=== Disk Usage ===" | tee -a $LOG_FILE
+df -h | tee -a $LOG_FILE
+DISK_ALERT=$(df -h | awk -v th=$DISK_THRESHOLD '$5+0 >= th {print $0}')
+if [ ! -z "$DISK_ALERT" ]; then
+    echo "WARNING: Disk usage above $DISK_THRESHOLD%:" | tee -a $LOG_FILE
+    echo "$DISK_ALERT" | tee -a $LOG_FILE
+fi
+
+# 6. Top CPU Consuming Processes
+echo -e "\n=== Top 5 CPU Consuming Processes ===" | tee -a $LOG_FILE
+ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6 | tee -a $LOG_FILE
+
+# 7. Top Memory Consuming Processes
+echo -e "\n=== Top 5 Memory Consuming Processes ===" | tee -a $LOG_FILE
+ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6 | tee -a $LOG_FILE
+
+# 8. Running Services Check
+echo -e "\n=== Service Status ===" | tee -a $LOG_FILE
+for service in "${SERVICES[@]}"; do
+    if systemctl is-active --quiet $service; then
+        echo "$service is running" | tee -a $LOG_FILE
+    else
+        echo "WARNING: $service is NOT running!" | tee -a $LOG_FILE
+        systemctl restart $service
+        echo "$service has been restarted" | tee -a $LOG_FILE
+    fi
+done
+
+# 9. Network Connections
+echo -e "\n=== Active Network Connections ===" | tee -a $LOG_FILE
+ss -tuln | tee -a $LOG_FILE
+
+# 10. Failed SSH Login Attempts
+echo -e "\n=== Failed SSH Login Attempts ===" | tee -a $LOG_FILE
+grep "Failed password" /var/log/auth.log | tail -n 10 | tee -a $LOG_FILE
+
+# 11. Email Alert if Threshold Exceeded
+ALERTS=$(grep "WARNING" $LOG_FILE)
+if [ ! -z "$ALERTS" ]; then
+    mail -s "Server Health Alert $(hostname)" $EMAIL < $LOG_FILE
+fi
+
+echo -e "\nHealth check completed at $(date)" | tee -a $LOG_FILE
