@@ -1,0 +1,101 @@
+#!/bin/bash
+# ============================================================================
+# Interactive Multi-Server Health Dashboard (HTML + Graphs) By Vikash Pandey
+# ============================================================================
+
+# CONFIGURATION
+SERVERS=("user1@192.168.1.101" "user2@192.168.1.102")  # SSH users@servers
+SERVICES=("nginx" "apache2" "mysql")                  # Services to monitor
+CPU_THRESHOLD=80
+MEM_THRESHOLD=80
+DISK_THRESHOLD=80
+OUTPUT="/var/www/html/server_dashboard.html"
+EMAIL="admin@example.com"                              # Optional email report
+
+# HTML HEADER + Inline CSS + Simple JS for interactivity
+cat > $OUTPUT <<'EOF'
+<html>
+<head>
+<title>Multi-Server Health Dashboard</title>
+<style>
+body {font-family: monospace; background:#111; color:#eee; padding:20px;}
+h1 {color:#0f0;} h2 {color:#0ff;} h3 {color:#ff0;}
+.warning {color:#f00; font-weight:bold;}
+.ok {color:#0f0;}
+table {width:100%; border-collapse: collapse; margin-bottom:20px;}
+th, td {border:1px solid #555; padding:5px; text-align:left;}
+th {background:#333;} td {background:#222;}
+.bar {height:15px; display:inline-block;}
+.cpu {background:#0f0;} .cpu-high {background:#f00;}
+.mem {background:#0f0;} .mem-high {background:#f00;}
+.disk {background:#0f0;} .disk-high {background:#f00;}
+</style>
+</head>
+<body>
+<h1>Multi-Server Health Dashboard</h1>
+<p>Generated: '$(date)'</p>
+EOF
+
+# Loop through servers
+for SERVER in "${SERVERS[@]}"; do
+    echo "<hr><h2>Server: $SERVER</h2>" >> $OUTPUT
+
+    # Run remote commands via SSH
+    ssh -o BatchMode=yes -o ConnectTimeout=5 $SERVER bash <<'ENDSSH' >> $OUTPUT
+# Gather metrics
+UPTIME=$(uptime)
+CPU_LOAD=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | cut -d. -f1)
+MEM_USED=$(free | awk '/Mem:/ {printf("%.0f"), $3/$2 * 100}')
+DISK_USED=$(df / | awk 'NR==2 {print $5+0}')
+TOP_CPU=$(ps -eo pid,cmd,%cpu --sort=-%cpu | head -n6)
+TOP_MEM=$(ps -eo pid,cmd,%mem --sort=-%mem | head -n6)
+
+# HTML output
+echo "<h3>Uptime</h3><pre>$UPTIME</pre>"
+
+# CPU Usage Bar
+CPU_CLASS="cpu"; [ $CPU_LOAD -ge 80 ] && CPU_CLASS="cpu-high"
+echo "<h3>CPU Load: $CPU_LOAD%</h3><div class='bar $CPU_CLASS' style='width:${CPU_LOAD}%'></div>"
+
+# Memory Usage Bar
+MEM_CLASS="mem"; [ $MEM_USED -ge 80 ] && MEM_CLASS="mem-high"
+echo "<h3>Memory Usage: $MEM_USED%</h3><div class='bar $MEM_CLASS' style='width:${MEM_USED}%'></div>"
+
+# Disk Usage Bar
+DISK_CLASS="disk"; [ $DISK_USED -ge 80 ] && DISK_CLASS="disk-high"
+echo "<h3>Disk Usage: $DISK_USED%</h3><div class='bar $DISK_CLASS' style='width:${DISK_USED}%'></div>"
+
+# Top CPU Processes
+echo "<h3>Top CPU Processes</h3><pre>$TOP_CPU</pre>"
+
+# Top Memory Processes
+echo "<h3>Top Memory Processes</h3><pre>$TOP_MEM</pre>"
+
+# Services Status
+echo "<h3>Service Status</h3><ul>"
+for service in nginx apache2 mysql; do
+    if systemctl is-active --quiet $service; then
+        echo "<li class='ok'>$service running</li>"
+    else
+        echo "<li class='warning'>$service NOT running</li>"
+    fi
+done
+echo "</ul>"
+
+# Failed SSH Logins
+echo "<h3>Recent Failed SSH Logins</h3><pre>$(grep 'Failed password' /var/log/auth.log | tail -n5)</pre>"
+
+# Active Network Connections
+echo "<h3>Network Connections</h3><pre>$(ss -tuln)</pre>"
+
+ENDSSH
+
+done
+
+# Close HTML
+echo "</body></html>" >> $OUTPUT
+
+# Optional Email
+[ -f "$OUTPUT" ] && mail -a "Content-type: text/html;" -s "Server Health Dashboard" $EMAIL < $OUTPUT
+
+echo "Dashboard generated at $OUTPUT"
