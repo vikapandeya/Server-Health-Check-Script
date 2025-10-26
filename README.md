@@ -1,6 +1,19 @@
 # Server-Health-Check-Script
 A full Bash script that performs a comprehensive infrastructure health check on a Linux server. This script will monitor:
 
+⚡ How to Use: Linux_Server
+
+Save script as Linux_Server_health.sh and make executable:
+
+chmod +x Linux_Server_health.sh
+
+./Linux_Server_health.sh
+
+
+Schedule in cron for automated monitoring (daily at 8 AM):
+
+0 8 * * * /path/to/Linux_Server_health.sh
+
 ⚡ How to Use: Multi-Server Health Check & HTML Dashboard
 
 Save script as multi_server_health.sh and make executable:
