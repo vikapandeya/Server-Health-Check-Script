@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# ====== CONFIGURATION ======
+URL="web_url"
+WEBHOOK_URL="https://test.webhook.office.com/webhookb2/3905c74-d4f7-----------"  # Teams Webhook URL
+LOG_FILE="/var/www/html/Website_monitor/website_monitor.log"
+TIMEOUT=10
+
+# ====== CHECK WEBSITE ======
+STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time $TIMEOUT $URL)
+
+if [ "$STATUS_CODE" -ne 200 ]; then
+    MESSAGE="🚨 Website Down Alert 🚨
+Website: $URL
+Status Code: $STATUS_CODE
+Time: $(date)"
+    
+    # Send alert to Microsoft Teams
+    PAYLOAD=$(jq -n --arg text "$MESSAGE" '{text: $text}')
+    curl -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+    
+    echo "$(date): Website DOWN - Status: $STATUS_CODE" >> "$LOG_FILE"
+else
+    echo "$(date): Website OK - Status: $STATUS_CODE" >> "$LOG_FILE"
+fi
