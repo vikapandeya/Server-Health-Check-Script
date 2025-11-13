@@ -1,0 +1,66 @@
+#!/bin/bash
+# ============================================================
+# Multi-Website Monitoring Script with Microsoft Teams Alerts
+# ============================================================
+
+# Teams Webhook URL
+WEBHOOK_URL="https://domain.webhook.office.com/webhookb2/________________________"  # ← Replace with your Teams webhook
+
+# Websites to Monitor (Add as many as you want)
+SITES=(
+  "https://site1.com/"
+  "https://site2.com/"
+  "https://site3.com/"
+  "https://site4.com/"
+  "https://site5.com/"
+)
+
+# Log file
+LOG_FILE="/var/www/html/Website_monitor/website_monitor.log"
+
+# Temp directory to store last status
+STATUS_DIR="/var/www/html/Website_monitor/status"
+mkdir -p "$STATUS_DIR"
+
+# Function to send message to Teams
+send_teams_message() {
+  local site="$1"
+  local message="$2"
+  local color="$3"
+
+  payload=$(jq -n \
+    --arg title "Website Monitor Alert" \
+    --arg text "$message" \
+    --arg themeColor "$color" \
+    '{ "@type": "MessageCard", "@context": "https://schema.org/extensions", "themeColor": $themeColor, "summary": $title, "sections": [{"activityTitle": $title, "text": $text}] }')
+
+  curl -s -H "Content-Type: application/json" -d "$payload" "$WEBHOOK_URL" >/dev/null
+}
+
+# Check each site
+for site in "${SITES[@]}"; do
+  site_name=$(echo "$site" | sed 's|https\?://||;s|/|_|g')
+  status_file="$STATUS_DIR/${site_name}.status"
+
+  http_code=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "$site")
+  timestamp=$(date)
+
+  if [ "$http_code" -eq 200 ]; then
+    echo "$timestamp: $site is UP (Status: $http_code)" >> "$LOG_FILE"
+    # Notify only if previously down
+    if [ "$(cat "$status_file" 2>/dev/null)" != "UP" ]; then
+      send_teams_message "$site" "✅ $site is back UP (HTTP $http_code)" "00FF00"
+      echo "UP" >"$status_file"
+    fi
+  else
+    echo "$timestamp: $site is DOWN (Status: $http_code)" >> "$LOG_FILE"
+    # Notify only if previously up
+    if [ "$(cat "$status_file" 2>/dev/null)" != "DOWN" ]; then
+      send_teams_message "$site" "🚨 $site appears DOWN (HTTP $http_code)" "FF0000"
+      echo "DOWN" >"$status_file"
+    fi
+  fi
+done
+
+# Cleanup logs older than 48 hours
+find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE")" -mmin +2880 -delete 2>/dev/null
